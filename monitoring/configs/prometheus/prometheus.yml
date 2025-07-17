@@ -43,3 +43,13 @@ scrape_configs:
       - targets: ["telegraf:9273"]
         labels:
           container: "telegraf"
+
+  - job_name: "backend"
+    metrics_path: "/openmrs/ws/rest/v1/metrics"
+    static_configs:
+      - targets: ["backend:8080"]
+        labels:
+          container: "backend"
+    basic_auth:
+      username: "admin"
+      password: "Admin123"

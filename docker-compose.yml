@@ -11,7 +11,7 @@ x-default-logging:
 x-common-labels: &default-labels
   logging: "promtail"
   logging_jobname: "containerlogs"
-  stackname: "docker-monitoring-stack-gpnc"
+  stackname: "openmrs-reference-application-3"
 
 services:
   certbot:
@@ -45,8 +45,12 @@ services:
       - "80:80"
       - "443:443"
     networks:
-      - reverse-proxy_public
-      - public
+      reverse-proxy_public:
+      public:
+      monitoring:
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost"]
+      timeout: 5s
     volumes:
       - letsencrypt-data:/etc/letsencrypt:ro
       - certbot-data:/var/www/certbot
@@ -66,7 +70,8 @@ services:
       SPA_CONFIG_URLS: /openmrs/spa/config-core_demo.json
       SPA_DEFAULT_LOCALE:
     networks:
-      - reverse-proxy_public
+      reverse-proxy_public:
+      monitoring:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/"]
       timeout: 5s
@@ -93,7 +98,9 @@ services:
       OMRS_CONFIG_CONNECTION_USERNAME: ${OMRS_DB_USER:-openmrs}
       OMRS_CONFIG_CONNECTION_PASSWORD: ${OMRS_DB_PASSWORD:-openmrs}
     networks:
-      - reverse-proxy_public
+      reverse-proxy_public:
+      monitoring:
+      database:
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/openmrs"]
       timeout: 5s
@@ -121,6 +128,9 @@ services:
       MYSQL_USER: ${OMRS_DB_USER:-openmrs}
       MYSQL_PASSWORD: ${OMRS_DB_PASSWORD:-openmrs}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-openmrs}
+    networks:
+      database:
+      monitoring:
     volumes:
       - db-data:/var/lib/mysql
     cpus: 0.5
@@ -144,23 +154,21 @@ services:
       GF_PANELS_ENABLE_ALPHA: true
       GF_FEATURE_TOGGLES_ENABLE: accessControlOnCall lokiLogsDataplane
       GF_INSTALL_PLUGINS: grafana-polystat-panel
+    networks:
+      monitoring:
+      reverse-proxy_public:
     volumes:
       - ./monitoring/configs/grafana/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/provisioning-dashboards.yaml:ro
       - ./monitoring/configs/grafana/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/provisioning-datasources.yaml:ro
-      - ./monitoring/dashboards/node-metrics.json:/var/lib/grafana/dashboards/node-metrics.json:ro
-      - ./monitoring/dashboards/host-docker-merged-metrics.json:/var/lib/grafana/dashboards/host-docker-merged-metrics.json:ro
-      - ./monitoring/dashboards/container-metrics.json:/var/lib/grafana/dashboards/container-metrics.json:ro
-      - ./monitoring/dashboards/log-search.json:/var/lib/grafana/dashboards/log-search.json:ro
+      - ./monitoring/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
-    # ports:
-    #   - 3000:3000
     cpus: 0.5
     mem_limit: 512m
-    networks:
-      - monitoring
-      - reverse-proxy_public
+    healthcheck:
+      test: wget --spider http://localhost:3000/api/health
+      timeout: 5s
     labels:
       <<: *default-labels
     logging: *default-logging
@@ -171,12 +179,11 @@ services:
     restart: unless-stopped
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--log.level=error'
+      - '--log.level=info'
       - '--storage.tsdb.path=/prometheus'
       - '--storage.tsdb.retention.time=7d'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
-      - '--web.external-url=http://localhost:9090'
     volumes:
       - ./monitoring/configs/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
       - ./monitoring/configs/prometheus/recording-rules.yml:/etc/prometheus/recording-rules.yml
@@ -184,13 +191,13 @@ services:
       - prometheus-data:/prometheus
     depends_on:
       - alertmanager
-    # ports:
-    #   - 9090:9090
     cpus: 0.5
     mem_limit: 512m
     networks:
-      - monitoring
-      - reverse-proxy_public
+      monitoring:
+    healthcheck:
+      test: wget --spider http://localhost:9090/-/ready
+      timeout: 5s
     labels:
       <<: *default-labels
     logging: *default-logging
@@ -202,13 +209,13 @@ services:
     volumes:
       - ./monitoring/configs/telegraf/telegraf.conf:/etc/telegraf/telegraf.conf
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    # ports:
-    #   - 9273:9273
     cpus: 0.5
     mem_limit: 512m
     networks:
-      - monitoring
-      - reverse-proxy_public
+      monitoring:
+    healthcheck:
+      test: wget --spider http://localhost:9273 
+      timeout: 5s
     labels:
       <<: *default-labels
     logging: *default-logging
@@ -229,7 +236,7 @@ services:
     cpus: 0.5
     mem_limit: 512m
     networks:
-      - monitoring
+      monitoring:
     labels:
       <<: *default-labels
     logging: *default-logging
@@ -250,8 +257,7 @@ services:
     cpus: 0.5
     mem_limit: 512m
     networks:
-      - monitoring
-      - reverse-proxy_public
+      monitoring:
     labels:
       <<: *default-labels
     logging: *default-logging
@@ -263,16 +269,17 @@ services:
       - '--config.file=/etc/alertmanager/config.yml'
       - '--log.level=error'
       - '--storage.path=/alertmanager'
-      - '--web.external-url=https://localhost/alertmanager'
     volumes:
       - ./monitoring/configs/alertmanager/alertmanager-fallback-config.yml:/etc/alertmanager/config.yml
-    # ports:
-    #   - 9093:9093
+    ports:
+      - 9093:9093
     cpus: 0.5
     mem_limit: 512m
     networks:
-      - monitoring
-      - reverse-proxy_public
+      monitoring:
+    healthcheck:
+      test: wget --spider http://localhost:9093/
+      timeout: 5s
     depends_on:
       - uncomplicated-alert-receiver
     labels:
@@ -280,18 +287,17 @@ services:
     logging: *default-logging
 
   uncomplicated-alert-receiver:
-    image: ghcr.io/jamesread/uncomplicated-alert-receiver:1.2.2
+    image: ghcr.io/jamesread/uncomplicated-alert-receiver:1.2.3
     container_name: uncomplicated-alert-receiver
     restart: unless-stopped
-    environment:
-      ALERTMANAGER_HOST: https://localhost/alertmanager
-    ports:
-      - 9094:8080
     cpus: 0.5
     mem_limit: 512m
     networks:
-      - monitoring
-      - reverse-proxy_public
+      monitoring:
+      reverse-proxy_public:
+    healthcheck:
+      test: curl -sf http://localhost:8080 
+      timeout: 5s
     labels:
       <<: *default-labels
     logging: *default-logging
@@ -299,13 +305,13 @@ services:
   redis:
     image: redis:${REDIS_VERSION:-6}
     container_name: redis
-    # ports:
-    #   - 6379:6379
     cpus: 0.5
     mem_limit: 512m
     networks:
-      - monitoring
-      - reverse-proxy_public
+      monitoring:
+    healthcheck:      
+      test: ["CMD-SHELL", "redis-cli", "ping"]
+      timeout: 5s
     labels:
       <<: *default-labels
     logging: *default-logging
@@ -314,8 +320,6 @@ services:
     image: grafana/loki:3.3.2
     container_name: loki
     user: root
-    # ports:
-    #   - 3100:3100
     command: -config.file=/etc/loki/loki.yaml
     volumes:
       - ./monitoring/configs/loki/loki.yaml:/etc/loki/loki.yaml
@@ -323,8 +327,10 @@ services:
     cpus: 0.5
     mem_limit: 512m
     networks:
-      - monitoring
-      - reverse-proxy_public
+      monitoring:
+    healthcheck:
+      test: wget --spider http://localhost:3100/ready
+      timeout: 5s
     labels:
       <<: *default-labels
     logging: *default-logging
@@ -342,7 +348,10 @@ services:
     cpus: 0.5
     mem_limit: 512m
     networks:
-      - monitoring
+      monitoring:
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/9080; exit $?;'"]
+      timeout: 5s
     labels:
       <<: *default-labels
     logging: *default-logging
@@ -358,7 +367,13 @@ volumes:
 networks:
   public:
     name: public
+    driver: bridge
   reverse-proxy_public:
     name: reverse-proxy_public
+    driver: bridge
   monitoring:
     name: monitoring
+    driver: bridge
+  database:
+    name: database
+    driver: bridge

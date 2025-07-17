@@ -37,32 +37,8 @@ upstream grafana {
   server grafana:3000;
 }
 
-upstream prometheus {
-  server prometheus:9090;
-}
-
-upstream telegraf {
-  server telegraf:9273;
-}
-
-upstream node-exporter {
-  server node-exporter:9090;
-}
-
-upstream alertmanager {
-  server alertmanager:9093;
-}
-
 upstream uncomplicated-alert-receiver {
   server uncomplicated-alert-receiver:8080;
-}
-
-upstream redis {
-  server redis:6379;
-}
-
-upstream loki {
-  server loki:3100;
 }
 
 
@@ -169,38 +145,6 @@ server {
     proxy_pass http://grafana;
   }
 
-  location /prometheus/ {
-    rewrite  ^/prometheus/(.*)  /$1 break;
-
-    proxy_set_header Host $host;
-    resolver 127.0.0.11 valid=30s;
-    proxy_pass http://prometheus;
-  }
-
-  location /telegraf/ {
-    rewrite  ^/telegraf/(.*)  /$1 break;
-
-    proxy_set_header Host $host;
-    resolver 127.0.0.11 valid=30s;
-    proxy_pass http://telegraf;
-  }
-
-  location /node-exporter/ {
-    rewrite  ^/node-exporter/(.*)  /$1 break;
-
-    proxy_set_header Host $host;
-    resolver 127.0.0.11 valid=30s;
-    proxy_pass http://node-exporter;
-  }
-
-  location /alertmanager/ {
-    rewrite  ^/alertmanager/(.*)  /$1 break;
-
-    proxy_set_header Host $host;
-    resolver 127.0.0.11 valid=30s;
-    proxy_pass http://alertmanager/;
-  }
-
   location /uncomplicated-alert-receiver/ {
     rewrite  ^/uncomplicated-alert-receiver/(.*)  /$1 break;
 
@@ -209,20 +153,12 @@ server {
     proxy_pass http://uncomplicated-alert-receiver;
   }
 
-  location /redis/ {
-    rewrite  ^/redis/(.*)  /$1 break;
+  location /uar/ {
+    rewrite  ^/uar/(.*)  /$1 break;
 
     proxy_set_header Host $host;
     resolver 127.0.0.11 valid=30s;
-    proxy_pass http://redis;
-  }
-
-  location /loki/ {
-    rewrite  ^/loki/(.*)  /$1 break;
-
-    proxy_set_header Host $host;
-    resolver 127.0.0.11 valid=30s;
-    proxy_pass http://loki;
+    proxy_pass http://uncomplicated-alert-receiver;
   }
 
   location /openmrs {
@@ -231,5 +167,73 @@ server {
 
   location = / {
     return 301 /openmrs/spa/;
+  }
+}
+
+server {
+  listen [::]:443 ssl;
+  listen 443 ssl;
+  http2 on;
+  server_name uar.${CERT_WEB_DOMAIN_COMMON_NAME}; 
+
+  ssl_certificate /etc/letsencrypt/live/${CERT_WEB_DOMAIN_COMMON_NAME}/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/${CERT_WEB_DOMAIN_COMMON_NAME}/privkey.pem;
+  include /var/www/certbot/conf/options-ssl-nginx.conf;
+  ssl_dhparam /var/www/certbot/conf/ssl-dhparams.pem;
+
+  add_header X-XSS-Protection "1; mode=block";
+  add_header Content-Security-Policy $csp_header;
+  add_header X-Content-Type-Options nosniff;
+
+  proxy_set_header      HOST $host;
+  proxy_set_header      X-Forwarded-Proto $forwarded_proto;
+  proxy_set_header      X-Real-IP $forwarded_ip;
+  proxy_set_header      X-Forwarded-For $proxy_add_x_forwarded_for;
+  # if serving this via HTTPS, the following is recommended
+  # proxy_cookie_flags      $var_proxy_cookie_flags;
+  proxy_http_version    1.1;
+
+  gzip on;
+  gzip_vary on;
+  # 1 KiB
+  gzip_min_length 1024;
+  gzip_proxied any;
+  gzip_http_version 1.0;
+  gzip_types  font/eot
+              font/otf
+              font/ttf
+              image/svg+xml
+              text/css
+              text/html
+              text/javascript
+              text/plain
+              text/xml
+              application/atom+xml
+              application/geo+json
+              application/importmap+json
+              application/javascript
+              application/x-javascript
+              application/json
+              application/ld+json
+              application/fhir+json
+              application/fhir+xml
+              application/manifest+json
+              application/rdf+xml
+              application/rss+xml
+              application/xhtml+xml
+              application/xml;
+
+  # all redirects are relative to the gateway
+  absolute_redirect off;
+
+  location ~ /.well-known/acme-challenge {
+    allow all;
+    root /var/www/certbot;
+  }
+
+  location / {
+    proxy_set_header Host $host;
+    resolver 127.0.0.11 valid=30s;
+    proxy_pass http://uncomplicated-alert-receiver;
   }
 }
